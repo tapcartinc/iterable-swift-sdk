@@ -29,6 +29,9 @@ struct RequestCreator {
         }
         
         body[JsonKey.newEmail] = newEmail
+
+        // IOS-2458: For now will hardcode this value
+        body["merge"] = true
         
         return .success(.post(createPostRequest(path: Const.Path.updateEmail, body: body)))
     }
