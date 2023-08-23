@@ -19,14 +19,24 @@ protocol IterableInternalInAppManagerProtocol: IterableInAppManagerProtocol, InA
     /// - parameter inboxSessionId: The ID of the inbox session that the message originates from.
     func handleClick(clickedUrl url: URL?, forMessage message: IterableInAppMessage, location: InAppLocation, inboxSessionId: String?)
     
+    
     /// - parameter message: The message to remove.
     /// - parameter location: The location from where this message was shown. `inbox` or `inApp`.
     /// - parameter source: The source of deletion `inboxSwipe` or `deleteButton`.`
     /// - parameter inboxSessionId: The ID of the inbox session that the message originates from.
     func remove(message: IterableInAppMessage, location: InAppLocation, source: InAppDeleteSource, inboxSessionId: String?)
+    
+    /// - parameter message: The message to remove.
+    /// - parameter location: The location from where this message was shown. `inbox` or `inApp`.
+    /// - parameter source: The source of deletion `inboxSwipe` or `deleteButton`.`
+    /// - parameter inboxSessionId: The ID of the inbox session that the message originates from.
+    /// - parameter successHandler: The callback which returns `success.
+    /// - parameter failureHandler: The callback which returns `failure.
+    func remove(message: IterableInAppMessage, location: InAppLocation, source: InAppDeleteSource, inboxSessionId: String?, successHandler: OnSuccessHandler?, failureHandler: OnFailureHandler?)
 }
 
 class InAppManager: NSObject, IterableInternalInAppManagerProtocol {
+    
     init(requestHandler: RequestHandlerProtocol,
          deviceMetadata: DeviceMetadata,
          fetcher: InAppFetcherProtocol,
@@ -40,7 +50,7 @@ class InAppManager: NSObject, IterableInternalInAppManagerProtocol {
          applicationStateProvider: ApplicationStateProviderProtocol,
          notificationCenter: NotificationCenterProtocol,
          dateProvider: DateProviderProtocol,
-         retryInterval: Double) {
+         moveToForegroundSyncInterval: Double) {
         ITBInfo()
         
         self.requestHandler = requestHandler
@@ -56,7 +66,7 @@ class InAppManager: NSObject, IterableInternalInAppManagerProtocol {
         self.applicationStateProvider = applicationStateProvider
         self.notificationCenter = notificationCenter
         self.dateProvider = dateProvider
-        self.retryInterval = retryInterval
+        self.moveToForegroundSyncInterval = moveToForegroundSyncInterval
         
         super.init()
         
@@ -124,26 +134,44 @@ class InAppManager: NSObject, IterableInternalInAppManagerProtocol {
     func remove(message: IterableInAppMessage, location: InAppLocation) {
         ITBInfo()
         
-        removePrivate(message: message, location: location)
+        remove(message: message, location: location, successHandler: nil, failureHandler: nil)
+    }
+    
+    func remove(message: IterableInAppMessage, location: InAppLocation, successHandler: OnSuccessHandler? = nil, failureHandler: OnFailureHandler? = nil) {
+        removePrivate(message: message, location: location, successHandler: successHandler, failureHandler: failureHandler)
     }
     
     func remove(message: IterableInAppMessage, location: InAppLocation, source: InAppDeleteSource) {
-        ITBInfo()
-        
-        removePrivate(message: message, location: location, source: source)
+        remove(message: message, location: location, source: source, successHandler: nil, failureHandler: nil)
     }
     
-    func remove(message: IterableInAppMessage, location: InAppLocation, source: InAppDeleteSource, inboxSessionId: String? = nil) {
+    func remove(message: IterableInAppMessage, location: InAppLocation, source: InAppDeleteSource, successHandler: OnSuccessHandler? = nil, failureHandler: OnFailureHandler? = nil) {
+        
+        removePrivate(message: message, location: location, source: source, successHandler: successHandler, failureHandler: failureHandler)
+    }
+    
+    func remove(message: IterableInAppMessage, location: InAppLocation, source: InAppDeleteSource, inboxSessionId: String?) {
         ITBInfo()
         
-        removePrivate(message: message, location: location, source: source, inboxSessionId: inboxSessionId)
+        remove(message: message, location: location, source: source, inboxSessionId: inboxSessionId, successHandler: nil, failureHandler: nil)
+    }
+    
+    func remove(message: IterableInAppMessage, location: InAppLocation, source: InAppDeleteSource, inboxSessionId: String? = nil, successHandler: OnSuccessHandler? = nil, failureHandler: OnFailureHandler? = nil) {
+        removePrivate(message: message, location: location, source: source, inboxSessionId: inboxSessionId, successHandler: successHandler, failureHandler: failureHandler)
     }
     
     func set(read: Bool, forMessage message: IterableInAppMessage) {
+        set(read: read, forMessage: message, successHandler: nil, failureHandler: nil)
+    }
+    
+    func set(read: Bool, forMessage message: IterableInAppMessage, successHandler: OnSuccessHandler? = nil, failureHandler: OnFailureHandler? = nil) {
         updateMessage(message, read: read).onSuccess { [weak self] _ in
+            successHandler?([:])
             self?.callbackQueue.async { [weak self] in
                 self?.notificationCenter.post(name: .iterableInboxChanged, object: self, userInfo: nil)
             }
+        }.onError { [weak self] _ in
+            failureHandler?(self?.description, nil)
         }
     }
     
@@ -185,8 +213,12 @@ class InAppManager: NSObject, IterableInternalInAppManagerProtocol {
     
     func remove(message: IterableInAppMessage) {
         ITBInfo()
-        
-        removePrivate(message: message)
+
+        remove(message: message, successHandler: nil, failureHandler: nil)
+    }
+    
+    func remove(message: IterableInAppMessage, successHandler: OnSuccessHandler?, failureHandler: OnFailureHandler?) {
+        removePrivate(message: message, location: .inApp, source: nil, successHandler: successHandler, failureHandler: failureHandler)
     }
     
     // MARK: - Private/Internal
@@ -391,7 +423,7 @@ class InAppManager: NSObject, IterableInternalInAppManagerProtocol {
     // How long do we have to wait before showing the message
     // > 0 means wait, otherwise we are good to show
     private func getInAppShowingWaitTimeInterval() -> TimeInterval {
-        InAppManager.getWaitTimeInterval(fromLastTime: lastDismissedTime, currentTime: dateProvider.currentDate, gap: retryInterval)
+        InAppManager.getWaitTimeInterval(fromLastTime: lastDismissedTime, currentTime: dateProvider.currentDate, gap: moveToForegroundSyncInterval)
     }
     
     // How long do we have to wait?
@@ -462,16 +494,17 @@ class InAppManager: NSObject, IterableInternalInAppManagerProtocol {
     private func removePrivate(message: IterableInAppMessage,
                                location: InAppLocation = .inApp,
                                source: InAppDeleteSource? = nil,
-                               inboxSessionId: String? = nil) {
+                               inboxSessionId: String? = nil,
+                               successHandler: OnSuccessHandler? = nil,
+                               failureHandler: OnFailureHandler? = nil) {
         ITBInfo()
-        
         updateMessage(message, didProcessTrigger: true, consumed: true)
         requestHandler?.inAppConsume(message: message,
                                      location: location,
                                      source: source,
                                      inboxSessionId: inboxSessionId,
-                                     onSuccess: nil,
-                                     onFailure: nil)
+                                     onSuccess: successHandler,
+                                     onFailure: failureHandler)
         callbackQueue.async { [weak self] in
             self?.notificationCenter.post(name: .iterableInboxChanged, object: self, userInfo: nil)
         }
@@ -521,7 +554,6 @@ class InAppManager: NSObject, IterableInternalInAppManagerProtocol {
     private let persister: InAppPersistenceProtocol
     private var messagesMap = OrderedDictionary<String, IterableInAppMessage>()
     private let dateProvider: DateProviderProtocol
-    private let retryInterval: TimeInterval // in seconds, if a message is already showing how long to wait?
     private var lastDismissedTime: Date?
     private var lastDisplayTime: Date?
     
@@ -532,7 +564,7 @@ class InAppManager: NSObject, IterableInternalInAppManagerProtocol {
     
     private var syncResult: Pending<Bool, Error>?
     private var lastSyncTime: Date?
-    private let moveToForegroundSyncInterval: Double = 1.0 * 60.0 // don't sync within sixty seconds
+    private var moveToForegroundSyncInterval: Double = 1.0 * 60.0 // don't sync within sixty seconds
     private var autoDisplayPaused = false
 }
 
@@ -621,13 +653,13 @@ extension InAppManager: InAppDisplayChecker {
             return false
         }
         
-        guard InAppManager.getWaitTimeInterval(fromLastTime: lastDismissedTime, currentTime: dateProvider.currentDate, gap: retryInterval) <= 0 else {
-            ITBInfo("can't display within retryInterval window")
+        guard InAppManager.getWaitTimeInterval(fromLastTime: lastDismissedTime, currentTime: dateProvider.currentDate, gap: moveToForegroundSyncInterval) <= 0 else {
+            ITBInfo("can't display within configured In-App display interval window")
             return false
         }
         
-        guard InAppManager.getWaitTimeInterval(fromLastTime: lastDisplayTime, currentTime: dateProvider.currentDate, gap: retryInterval) <= 0 else {
-            ITBInfo("can't display within retryInterval window")
+        guard InAppManager.getWaitTimeInterval(fromLastTime: lastDisplayTime, currentTime: dateProvider.currentDate, gap: moveToForegroundSyncInterval) <= 0 else {
+            ITBInfo("can't display within configured In-App display window")
             return false
         }
         

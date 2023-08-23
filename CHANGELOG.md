@@ -2,6 +2,66 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+## 6.4.15
+### Added
+- This release allows you to use projects hosted on Iterable's EU data center. If your project is hosted on Iterable's [European data center (EUDC)](https://support.iterable.com/hc/articles/17572750887444), configure the SDK to use Iterable's EU-based API endpoints:
+
+_Swift_
+
+```swift
+let config = IterableConfig()
+config.dataRegion = IterableDataRegion.EU
+IterableAPI.initialize(apiKey: "<YOUR_API_KEY>", launchOptions: launchOptions, config: config)
+```
+
+_Objective-C_
+
+```objectivec
+IterableConfig *config = [[IterableConfig alloc] init];
+config.dataRegion = IterableDataRegion.EU;
+[IterableAPI initializeWithApiKey:@"<YOUR_API_KEY>" launchOptions:launchOptions config:config];
+```
+
+### Fixed
+- Offline Mode is now off by default. Offline mode components will only load when the `offlineMode` configuration for RequestHandler is set to true.
+
+### Changed
+- Offline mode configuration now persists throughout the current app session. Changes will take effect from the next app session.
+
+## 6.4.14
+### Added
+- Success and Failure handlers can now be passed to following functions:
+`InAppManager.remove`, `InAppManager.setRead`, `IterableAPI.setEmail` and `IterableAPI.setUserId`
+
+## 6.4.13
+### Added
+- `ITBNotificationServiceExtension` has a new optional delegate in the scenario of wanting to receive and pass along push information (e.g. Firebase)
+
+### Changed
+- The behavior of `lastPushPayload` now matches that of the Android SDK in being purely in memory and will now not count the payload of a silent push
+
+### Fixed
+- The `itbl_inapp.json` file generated from in-app messaging has been relocated to the correct spot
+
+## 6.4.12
+### Added
+- Added a new function to `IterableAPI` to get the currently set authentication token
+- Added a new function (`onTokenRegistrationFailed`) to the `IterableAuthDelegate` upon authentication token retrieval failure
+
+### Changed
+- Changed `setEmail` and `setUserId` to run through the login process if also sent in an authentication token (and a non-`nil` ID)
+
+### Fixed
+- Fixed instances where setting a new authentication token for a user failed
+
+## 6.4.11
+### Fixed
+- Fixed so that `AuthManager` clears the previous refresh timer before setting a new one (thanks, @cranberyxl!)
+
+## 6.4.10
+### Fixed
+- Fixed instances where `config.inAppDisplayInterval` would not set custom interval set via react native layer.
+
 ### 6.4.9
 ### Added
 [Version version 6.4.9](https://github.com/Iterable/swift-sdk/releases/tag/6.4.9) of Iterable's iOS SDK makes it possible to store in-app messages in memory, rather than in an unencrypted local file. However, an unencrypted local file is still the default option.
